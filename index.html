@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#1b2340">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Grand Stay</title>
+<style>
+:root{--bg:#1b2340;--card:#273259;--card2:#313e70;--ink:#f4f6ff;--mute:#9aa6d6;--gold:#ffc83d;--ok:#4ade80;--bad:#fb7185;--accent:#6c8cff}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overscroll-behavior:none}
+#app{display:flex;flex-direction:column;height:100%;max-width:520px;margin:0 auto;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+header{padding:12px 16px 8px;display:flex;justify-content:space-between;align-items:center}
+h1{font-size:18px;margin:0;letter-spacing:.5px}
+.coins{font-size:22px;font-weight:700;color:var(--gold)}
+.sub{font-size:12px;color:var(--mute)}
+main{flex:1;overflow-y:auto;padding:0 12px 12px;-webkit-overflow-scrolling:touch}
+.lobby{background:var(--card);border-radius:16px;padding:12px;margin-bottom:12px;display:flex;align-items:center;gap:12px}
+.queue{flex:1;font-size:26px;min-height:34px;letter-spacing:2px}
+button{font:inherit;color:inherit;border:0;border-radius:12px;padding:12px 14px;background:var(--accent);font-weight:700;touch-action:manipulation}
+button:active{transform:scale(.97)}
+button:disabled{background:#3a4575;color:#7480b3}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.room{background:var(--card);border-radius:16px;padding:10px;position:relative;overflow:hidden;min-height:116px;display:flex;flex-direction:column;justify-content:space-between}
+.room .t{display:flex;justify-content:space-between;font-size:13px;color:var(--mute)}
+.room .ic{font-size:30px;text-align:center}
+.room.occupied{background:#27455a}.room.dirty{background:#5a3b2f}.room.locked{opacity:.85}
+.bar{height:5px;background:#0003;border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--ok);width:0}
+.room button{padding:8px;font-size:13px}
+h2{font-size:15px;margin:18px 4px 8px}
+.row{background:var(--card);border-radius:14px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px}
+.row .i{flex:1}.row b{display:block}.row small{color:var(--mute)}
+nav{display:flex;background:var(--card);border-top:1px solid #0003}
+nav button{flex:1;border-radius:0;background:none;color:var(--mute);padding:14px 4px}
+nav button.on{color:var(--ink);box-shadow:inset 0 -3px var(--accent)}
+.pop{position:fixed;left:50%;top:38%;transform:translateX(-50%);color:var(--gold);font-weight:800;pointer-events:none;animation:up 1s forwards}
+@keyframes up{to{transform:translate(-50%,-60px);opacity:0}}
+.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#000c;padding:10px 16px;border-radius:20px;font-size:13px}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div><h1>🏨 Grand Stay</h1><div class="sub" id="sub"></div></div>
+    <div style="text-align:right"><div class="coins" id="coins">0</div><div class="sub" id="rate"></div></div>
+  </header>
+  <main id="main"></main>
+  <nav>
+    <button data-tab="hotel" class="on">Hotel</button>
+    <button data-tab="staff">Equipe</button>
+    <button data-tab="prestige">Estrelas</button>
+  </nav>
+</div>
+<script>
+'use strict';
+const SAVE_KEY = 'grandstay.v1';
+const N_ROOMS = 8, MAX_LV = 6, STAY = 8, QMAX = 5;
+const STAFF = [
+  {id:'recep', name:'Recepcionista', icon:'🛎️', desc:'Faz check-in sozinho', base:150},
+  {id:'maid',  name:'Camareira',     icon:'🧹', desc:'Limpa quartos sozinha', base:200},
+  {id:'conc',  name:'Concierge',     icon:'🎩', desc:'+15% de renda por nível', base:400},
+];
+const fmt = n => n < 1e3 ? Math.floor(n) + '' : n < 1e6 ? (n/1e3).toFixed(1) + 'K' : n < 1e9 ? (n/1e6).toFixed(2) + 'M' : (n/1e9).toFixed(2) + 'B';
+const roomUnlock = i => Math.floor(60 * Math.pow(2.4, i));
+const roomUpgrade = lv => Math.floor(40 * Math.pow(2.1, lv));
+const staffCost = (s, lv) => Math.floor(s.base * Math.pow(2.3, lv));
+
+function fresh(){
+  return {coins:60, stars:0, queue:2, rooms:Array.from({length:N_ROOMS},(_,i)=>({lv:i===0?1:0, st:'free', t:0})),
+          staff:{recep:0,maid:0,conc:0}, acc:{arr:0,rec:0,maid:0}, last:Date.now(), total:0};
+}
+let S = load();
+function load(){
+  try{ const o = JSON.parse(localStorage.getItem(SAVE_KEY)); if(o && o.rooms) return Object.assign(fresh(), o); }catch(e){}
+  return fresh();
+}
+function save(){ try{ S.last = Date.now(); localStorage.setItem(SAVE_KEY, JSON.stringify(S)); }catch(e){} }
+
+const mult = () => (1 + 0.15 * S.staff.conc) * (1 + 0.1 * S.stars);
+const roomIncome = r => 10 * r.lv * mult();
+
+function checkIn(){
+  if(S.queue <= 0) return false;
+  let best = -1;
+  S.rooms.forEach((r,i) => { if(r.lv > 0 && r.st === 'free' && (best < 0 || r.lv > S.rooms[best].lv)) best = i; });
+  if(best < 0) return false;
+  S.queue--; S.rooms[best].st = 'occupied'; S.rooms[best].t = STAY;
+  return true;
+}
+function clean(i){ const r = S.rooms[i]; if(r.st === 'dirty'){ r.st = 'free'; return true; } return false; }
+
+function step(dt){
+  S.acc.arr += dt;
+  const arrEvery = 4 / (1 + 0.05 * S.rooms.filter(r => r.lv > 0).length);
+  while(S.acc.arr >= arrEvery){ S.acc.arr -= arrEvery; if(S.queue < QMAX) S.queue++; }
+  if(S.staff.recep > 0){ S.acc.rec += dt; const e = 3 / S.staff.recep; while(S.acc.rec >= e){ S.acc.rec -= e; checkIn(); } }
+  if(S.staff.maid > 0){ S.acc.maid += dt; const e = 3 / S.staff.maid;
+    while(S.acc.maid >= e){ S.acc.maid -= e; const i = S.rooms.findIndex(r => r.st === 'dirty'); if(i >= 0) clean(i); } }
+  S.rooms.forEach(r => {
+    if(r.st === 'occupied'){ r.t -= dt; if(r.t <= 0){ r.st = 'dirty'; const g = roomIncome(r); S.coins += g; S.total += g; pop('+' + fmt(g)); } }
+  });
+}
+
+/* ------- UI ------- */
+let tab = 'hotel', dirty = true;
+const $ = s => document.querySelector(s);
+function pop(t){ const d = document.createElement('div'); d.className = 'pop'; d.textContent = t; d.style.left = (30 + Math.random()*40) + '%'; document.body.appendChild(d); setTimeout(() => d.remove(), 1000); }
+function toast(t){ const d = document.createElement('div'); d.className = 'toast'; d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), 1800); }
+const ICON = {free:'🛏️', occupied:'😴', dirty:'🧺'};
+
+function render(){
+  $('#coins').textContent = '🪙 ' + fmt(S.coins);
+  const perCycle = S.rooms.reduce((a,r) => a + (r.lv ? roomIncome(r) / STAY : 0), 0);
+  $('#rate').textContent = '≈ ' + fmt(perCycle) + '/s máx.';
+  $('#sub').textContent = '⭐ ' + S.stars + ' estrelas · x' + mult().toFixed(2);
+  const m = $('#main');
+  if(tab === 'hotel'){
+    let h = '<div class="lobby"><div class="queue" id="q"></div><button id="ci">Check-in</button></div><div class="grid">';
+    S.rooms.forEach((r,i) => {
+      if(r.lv === 0){
+        const c = roomUnlock(i);
+        h += `<div class="room locked"><div class="t"><span>Quarto ${i+1}</span><span>🔒</span></div><div class="ic">🚪</div><button data-unlock="${i}" ${S.coins<c?'disabled':''}>Abrir 🪙${fmt(c)}</button></div>`;
+      }else{
+        const up = r.lv < MAX_LV ? `<button data-up="${i}" ${S.coins<roomUpgrade(r.lv)?'disabled':''}>⬆ 🪙${fmt(roomUpgrade(r.lv))}</button>` : '<button disabled>MÁX</button>';
+        h += `<div class="room ${r.st}" data-room="${i}"><div class="t"><span>Quarto ${i+1}</span><span>${'★'.repeat(r.lv)}</span></div><div class="ic">${ICON[r.st]}</div><div class="bar"><i id="b${i}"></i></div>${up}</div>`;
+      }
+    });
+    m.innerHTML = h + '</div>';
+  }else if(tab === 'staff'){
+    m.innerHTML = '<h2>Contrate sua equipe</h2>' + STAFF.map(s => {
+      const lv = S.staff[s.id], c = staffCost(s, lv);
+      return `<div class="row"><div style="font-size:30px">${s.icon}</div><div class="i"><b>${s.name} · nv ${lv}</b><small>${s.desc}</small></div><button data-staff="${s.id}" ${S.coins<c?'disabled':''}>🪙${fmt(c)}</button></div>`;
+    }).join('');
+  }else{
+    const gain = Math.floor(Math.sqrt(S.total / 5000));
+    m.innerHTML = `<h2>Estrelas</h2><div class="row"><div class="i"><b>Reinaugurar o hotel</b><small>Reinicia moedas, quartos e equipe. Cada estrela dá +10% de renda para sempre.<br>Ganho agora: <b>${Math.max(0,gain - S.stars)}</b> ⭐ (total ganho neste hotel: 🪙${fmt(S.total)})</small></div><button id="pr" ${gain<=S.stars?'disabled':''}>Reinaugurar</button></div>
+    <h2>Dados</h2><div class="row"><div class="i"><b>Jogo 100% offline</b><small>Sem anúncios, sem conta. O progresso fica salvo neste aparelho.</small></div></div>
+    <div class="row"><div class="i"><b>Apagar progresso</b></div><button id="wipe" style="background:var(--bad)">Apagar</button></div>`;
+  }
+  dirty = false;
+}
+function tick(){
+  if(tab === 'hotel'){
+    const q = $('#q'); if(q) q.textContent = S.queue ? '🧳'.repeat(S.queue) : '—';
+    const ci = $('#ci'); if(ci) ci.disabled = S.queue <= 0;
+    S.rooms.forEach((r,i) => { const b = $('#b'+i); if(b) b.style.width = r.st === 'occupied' ? (100 - r.t / STAY * 100) + '%' : r.st === 'dirty' ? '100%' : '0'; });
+  }
+}
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('button, [data-room]'); if(!t) return;
+  const d = t.dataset;
+  if(d.tab){ tab = d.tab; document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b === t)); dirty = true; }
+  else if(t.id === 'ci'){ if(!checkIn()) toast('Sem quarto livre!'); dirty = true; }
+  else if(d.unlock != null){ const c = roomUnlock(+d.unlock); if(S.coins >= c){ S.coins -= c; S.rooms[+d.unlock].lv = 1; dirty = true; } }
+  else if(d.up != null){ const r = S.rooms[+d.up], c = roomUpgrade(r.lv); if(S.coins >= c && r.lv < MAX_LV){ S.coins -= c; r.lv++; dirty = true; } }
+  else if(d.staff){ const s = STAFF.find(x => x.id === d.staff), c = staffCost(s, S.staff[s.id]); if(S.coins >= c){ S.coins -= c; S.staff[s.id]++; dirty = true; } }
+  else if(d.room != null){ if(clean(+d.room)) dirty = true; }
+  else if(t.id === 'pr'){ const g = Math.floor(Math.sqrt(S.total / 5000)); if(g > S.stars && confirm('Reinaugurar e ganhar ' + (g - S.stars) + ' estrela(s)?')){ const f = fresh(); f.stars = g; S = f; dirty = true; } }
+  else if(t.id === 'wipe'){ if(confirm('Apagar todo o progresso?')){ S = fresh(); dirty = true; } }
+  save();
+});
+
+/* offline progress (limitado a 2h, 50% de eficiência) */
+(function offline(){
+  const away = Math.min((Date.now() - S.last) / 1000, 7200);
+  if(away > 30){
+    const g = S.rooms.reduce((a,r) => a + (r.lv ? roomIncome(r) / (STAY + 4) : 0), 0) * away * 0.5 * (S.staff.recep && S.staff.maid ? 1 : 0.3);
+    if(g >= 1){ S.coins += g; S.total += g; setTimeout(() => toast('Enquanto você estava fora: +🪙' + fmt(g)), 400); }
+  }
+})();
+
+function sig(){
+  const aff = [...S.rooms.map((r,i) => r.lv ? S.coins >= roomUpgrade(r.lv) : S.coins >= roomUnlock(i)), ...STAFF.map(x => S.coins >= staffCost(x, S.staff[x.id]))];
+  return [tab, S.stars, S.rooms.map(r => r.st + r.lv).join(), aff.join(), Object.values(S.staff).join(), Math.floor(Math.sqrt(S.total / 5000))].join('|');
+}
+let prev = performance.now(), lastSig = '';
+(function loop(now){
+  const dt = Math.min((now - prev) / 1000, 1); prev = now;
+  step(dt);
+  const sg = sig();
+  if(dirty || sg !== lastSig){ const sy = $('#main').scrollTop; render(); $('#main').scrollTop = sy; lastSig = sg; }
+  $('#coins').textContent = '🪙 ' + fmt(S.coins);
+  tick(); requestAnimationFrame(loop);
+})(prev);
+setInterval(save, 5000);
+document.addEventListener('visibilitychange', () => { if(document.hidden) save(); });
+window.addEventListener('pagehide', save);
+if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
