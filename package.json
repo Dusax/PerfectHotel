@@ -1,0 +1,17 @@
+{
+  "name": "grand-stay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Grand Stay - jogo de gerenciamento de hotel para celular",
+  "scripts": {
+    "build:www": "node scripts/build-www.mjs",
+    "android:add": "npm run build:www && npx cap add android",
+    "android:sync": "npm run build:www && npx cap sync android",
+    "android:open": "npx cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/cli": "^6.0.0",
+    "@capacitor/core": "^6.0.0"
+  }
+}
