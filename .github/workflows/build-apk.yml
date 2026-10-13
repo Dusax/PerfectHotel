@@ -26,6 +26,7 @@ jobs:
         run: |
           npm run build:www
           npx cap add android
+          npm run android:icons
           npx cap sync android
       - name: Compilar APK
         working-directory: android
